@@ -426,6 +426,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🗑 Test o'chirish", callback_data="adm:del")],
         [InlineKeyboardButton(text="📋 Testlar ro'yxati", callback_data="adm:list")],
         [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="adm:users")],
+        [InlineKeyboardButton(text="🏠 Asosiy sahifa", callback_data="back:main")],
     ])
 
 
