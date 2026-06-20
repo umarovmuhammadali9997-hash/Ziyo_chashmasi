@@ -604,6 +604,10 @@ async def adm_users(call: CallbackQuery):
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("admin")]]),
         )
     await call.answer()
+
+
+# ============================================================
+async def main():
     global BOT_USERNAME
     db.init_db()
     me = await bot.get_me()
