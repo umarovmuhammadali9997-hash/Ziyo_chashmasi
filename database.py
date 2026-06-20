@@ -63,6 +63,17 @@ def init_db():
             created_at  TEXT
         )
     """)
+    # Admin qo'shgan testlar (PDF Telegram file_id orqali saqlanadi)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS quiz_tests (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject     TEXT,
+            title       TEXT,
+            file_id     TEXT,
+            answers     TEXT,
+            created_at  TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -193,3 +204,55 @@ def user_results(user_id, limit=10):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------- Admin testlari ----------
+def add_test(subject, title, file_id, answers):
+    conn = _conn()
+    cur = conn.execute(
+        "INSERT INTO quiz_tests (subject, title, file_id, answers, created_at) VALUES (?,?,?,?,?)",
+        (subject, title, file_id, answers, datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    tid = cur.lastrowid
+    conn.close()
+    return tid
+
+
+def list_tests_db(subject):
+    conn = _conn()
+    rows = conn.execute(
+        "SELECT id, title, file_id, answers FROM quiz_tests WHERE subject=? ORDER BY id",
+        (subject,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_test_db(test_id):
+    conn = _conn()
+    row = conn.execute("SELECT * FROM quiz_tests WHERE id=?", (test_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_test_db(test_id):
+    conn = _conn()
+    cur = conn.execute("DELETE FROM quiz_tests WHERE id=?", (test_id,))
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return deleted > 0
+
+
+def all_tests_grouped():
+    """Fan bo'yicha guruhlangan testlar: {subject: [ {id, title, answers}, ... ]}"""
+    conn = _conn()
+    rows = conn.execute(
+        "SELECT id, subject, title, answers FROM quiz_tests ORDER BY subject, id"
+    ).fetchall()
+    conn.close()
+    grouped = {}
+    for r in rows:
+        grouped.setdefault(r["subject"], []).append(dict(r))
+    return grouped
