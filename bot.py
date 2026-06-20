@@ -400,6 +400,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Test qo'shish", callback_data="adm:add")],
         [InlineKeyboardButton(text="🗑 Test o'chirish", callback_data="adm:del")],
         [InlineKeyboardButton(text="📋 Testlar ro'yxati", callback_data="adm:list")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="adm:users")],
     ])
 
 
@@ -541,8 +542,35 @@ async def adm_list(call: CallbackQuery):
     await call.answer()
 
 
-# ============================================================
-async def main():
+# ---------- Foydalanuvchilar ro'yxati ----------
+@dp.callback_query(F.data == "adm:users")
+async def adm_users(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    users = db.all_users()
+    if not users:
+        await call.answer("Hozircha foydalanuvchi yo'q.", show_alert=True)
+        return
+
+    await call.message.answer(f"👥 Jami foydalanuvchilar: <b>{len(users)}</b>", parse_mode="HTML")
+
+    # Ro'yxatni bo'laklab yuborish (Telegram 4096 belgi cheklovi)
+    chunk = ""
+    for i, u in enumerate(users, 1):
+        uname = f"@{u['username']}" if u.get("username") else "—"
+        block = (
+            f"{i}. <b>{u['full_name']}</b>\n"
+            f"   🎓 {u['grade']}  |  🧭 {u['direction']}\n"
+            f"   📞 {u['phone']}  |  {uname}\n"
+            f"   👥 Takliflar: {u['ref_count'] or 0}\n\n"
+        )
+        if len(chunk) + len(block) > 3500:
+            await call.message.answer(chunk, parse_mode="HTML")
+            chunk = ""
+        chunk += block
+    if chunk:
+        await call.message.answer(chunk, parse_mode="HTML")
+    await call.answer()
     global BOT_USERNAME
     db.init_db()
     me = await bot.get_me()
