@@ -152,6 +152,16 @@ def all_user_ids():
     return [r["user_id"] for r in rows]
 
 
+def all_users():
+    conn = _conn()
+    rows = conn.execute(
+        "SELECT full_name, grade, phone, direction, ref_count, username, joined_at "
+        "FROM users WHERE phone IS NOT NULL ORDER BY joined_at"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def user_count():
     conn = _conn()
     n = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
