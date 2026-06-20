@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import io
+from urllib.parse import quote
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
@@ -383,7 +384,11 @@ async def check_answers(message: Message, state: FSMContext):
     db.clear_active_test(message.from_user.id)
     await state.clear()
 
-    await message.answer("\n".join(text), parse_mode="HTML")
+    result_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Yo'nalishga qaytish", callback_data="back:main")],
+        [InlineKeyboardButton(text="👥 Do'stlarimni chaqiraman", callback_data="invite")],
+    ])
+    await message.answer("\n".join(text), parse_mode="HTML", reply_markup=result_kb)
 
 
 # ============================================================
@@ -417,6 +422,26 @@ async def on_referral(call: CallbackQuery):
 @dp.message(Command("referal"))
 async def cmd_referral(message: Message):
     await show_referral(message, message.from_user.id)
+
+
+# ---------- Do'stlarni chaqirish (ulashiladigan reklama) ----------
+INVITE_TEXT = (
+    "🎓 DTM, Sertifikat va Attestatsiyaga oson tayyorlanmoqchimisan?\n\n"
+    "Kir va o'zingni bepul sinab ko'r! 👇"
+)
+
+
+@dp.callback_query(F.data == "invite")
+async def on_invite(call: CallbackQuery):
+    link = f"https://t.me/{BOT_USERNAME}?start=ref{call.from_user.id}"
+    share_full = f"{INVITE_TEXT}\n\n{link}"
+    share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(INVITE_TEXT)}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Do'stlarga ulashish", url=share_url)],
+        [back_btn("main")],
+    ])
+    await call.message.answer(share_full, reply_markup=kb, disable_web_page_preview=False)
+    await call.answer()
 
 
 # ============================================================
