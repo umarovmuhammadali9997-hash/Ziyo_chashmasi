@@ -13,12 +13,10 @@ from aiogram.types import (
     ReplyKeyboardRemove,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    FSInputFile,
 )
 
 import database as db
-import tests_data as td
-from config import BOT_TOKEN, BRAND_NAME
+from config import BOT_TOKEN, BRAND_NAME, ADMIN_IDS
 from subjects import SUBJECTS, DIRECTION_SUBJECTS
 
 logging.basicConfig(level=logging.INFO)
@@ -50,6 +48,16 @@ class Reg(StatesGroup):
 
 class Answer(StatesGroup):
     waiting = State()
+
+
+class AddTest(StatesGroup):
+    title = State()
+    pdf = State()
+    answers = State()
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
 
 
 GRADES = ["8-sinf", "9-sinf", "10-sinf", "11-sinf", "Abituriyent", "O'qituvchi"]
@@ -226,17 +234,17 @@ async def reg_direction(call: CallbackQuery, state: FSMContext):
 
 
 # ============================================================
-#  Fan tanlandi -> testlar ro'yxati
+#  Fan tanlandi -> testlar ro'yxati (bazadan)
 # ============================================================
 @dp.callback_query(F.data.startswith("subj:"))
 async def on_subject(call: CallbackQuery):
     key = call.data.split(":", 1)[1]
-    tests = td.list_tests(key)
+    tests = db.list_tests_db(key)
     if not tests:
         await call.answer("Bu fanga hozircha test qo'shilmagan.", show_alert=True)
         return
     rows = [
-        [InlineKeyboardButton(text=f"📄 {t['title']}", callback_data=f"test:{key}:{t['id']}")]
+        [InlineKeyboardButton(text=f"📄 {t['title']}", callback_data=f"test:{t['id']}")]
         for t in tests
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -249,15 +257,14 @@ async def on_subject(call: CallbackQuery):
 # ============================================================
 @dp.callback_query(F.data.startswith("test:"))
 async def on_test(call: CallbackQuery):
-    _, key, test_id = call.data.split(":", 2)
-    test = td.get_test(key, test_id)
+    test_id = int(call.data.split(":", 1)[1])
+    test = db.get_test_db(test_id)
     if not test:
         await call.answer("Test topilmadi.", show_alert=True)
         return
 
-    pdf_path = td.test_pdf_path(key, test)
     await call.message.answer_document(
-        FSInputFile(pdf_path),
+        test["file_id"],
         caption=f"📄 {test['title']}\n{BRAND_NAME}",
     )
 
@@ -270,7 +277,7 @@ async def on_test(call: CallbackQuery):
     )
     ready_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Kalit yuborishga tayyorman",
-                              callback_data=f"ready:{key}:{test_id}")]
+                              callback_data=f"ready:{test_id}")]
     ])
     await call.message.answer(info, parse_mode="HTML", reply_markup=ready_kb)
     await call.answer()
@@ -281,12 +288,12 @@ async def on_test(call: CallbackQuery):
 # ============================================================
 @dp.callback_query(F.data.startswith("ready:"))
 async def on_ready(call: CallbackQuery, state: FSMContext):
-    _, key, test_id = call.data.split(":", 2)
-    test = td.get_test(key, test_id)
+    test_id = int(call.data.split(":", 1)[1])
+    test = db.get_test_db(test_id)
     if not test:
         await call.answer("Test topilmadi.", show_alert=True)
         return
-    db.set_active_test(call.from_user.id, key, list(test["answers"]))
+    db.set_active_test(call.from_user.id, test["subject"], list(test["answers"]))
     await state.update_data(test_title=test["title"])
     await state.set_state(Answer.waiting)
     await call.message.answer(
@@ -383,6 +390,155 @@ async def on_referral(call: CallbackQuery):
 @dp.message(Command("referal"))
 async def cmd_referral(message: Message):
     await show_referral(message, message.from_user.id)
+
+
+# ============================================================
+#  ADMIN PANEL
+# ============================================================
+def admin_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Test qo'shish", callback_data="adm:add")],
+        [InlineKeyboardButton(text="🗑 Test o'chirish", callback_data="adm:del")],
+        [InlineKeyboardButton(text="📋 Testlar ro'yxati", callback_data="adm:list")],
+    ])
+
+
+def admin_subjects_kb(prefix: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=name, callback_data=f"{prefix}:{key}")]
+        for key, name in SUBJECTS.items()
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return  # admin bo'lmaganlarga javob yo'q
+    await state.clear()
+    await message.answer("🛠 Admin panel", reply_markup=admin_menu_kb())
+
+
+# ---------- Test qo'shish ----------
+@dp.callback_query(F.data == "adm:add")
+async def adm_add(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    await call.message.answer("Qaysi fanga test qo'shasiz?",
+                              reply_markup=admin_subjects_kb("addsub"))
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("addsub:"))
+async def adm_add_subject(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return
+    key = call.data.split(":", 1)[1]
+    await state.update_data(subject=key)
+    await state.set_state(AddTest.title)
+    await call.message.answer(
+        f"Fan: {SUBJECTS[key]}\n\n📝 Test nomini yozing (masalan: DTM Ziyo chashmasi 002):"
+    )
+    await call.answer()
+
+
+@dp.message(AddTest.title, F.text)
+async def adm_add_title(message: Message, state: FSMContext):
+    await state.update_data(title=message.text.strip())
+    await state.set_state(AddTest.pdf)
+    await message.answer("📎 Endi test PDF faylini yuboring:")
+
+
+@dp.message(AddTest.pdf, F.document)
+async def adm_add_pdf(message: Message, state: FSMContext):
+    await state.update_data(file_id=message.document.file_id)
+    await state.set_state(AddTest.answers)
+    await message.answer(
+        "✅ PDF qabul qilindi.\n\n"
+        "🔑 Endi to'g'ri javoblar kalitini yuboring (masalan: <code>abcdabcd...</code>):",
+        parse_mode="HTML",
+    )
+
+
+@dp.message(AddTest.pdf)
+async def adm_add_pdf_invalid(message: Message):
+    await message.answer("Iltimos, PDF faylni yuboring.")
+
+
+@dp.message(AddTest.answers, F.text)
+async def adm_add_answers(message: Message, state: FSMContext):
+    answers = "".join(parse_answers(message.text))
+    if not answers:
+        await message.answer("Kalit bo'sh yoki noto'g'ri. Faqat a/b/c/d harflari bilan yuboring.")
+        return
+    data = await state.get_data()
+    db.add_test(data["subject"], data["title"], data["file_id"], answers)
+    await state.clear()
+    await message.answer(
+        f"✅ Test qo'shildi!\n\n"
+        f"📚 Fan: {SUBJECTS[data['subject']]}\n"
+        f"📄 Nomi: {data['title']}\n"
+        f"🔢 Savollar soni: {len(answers)}",
+        reply_markup=admin_menu_kb(),
+    )
+
+
+# ---------- Test o'chirish ----------
+@dp.callback_query(F.data == "adm:del")
+async def adm_del(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    await call.message.answer("Qaysi fandan o'chirasiz?",
+                              reply_markup=admin_subjects_kb("delsub"))
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("delsub:"))
+async def adm_del_subject(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    key = call.data.split(":", 1)[1]
+    tests = db.list_tests_db(key)
+    if not tests:
+        await call.answer("Bu fanda test yo'q.", show_alert=True)
+        return
+    rows = [
+        [InlineKeyboardButton(text=f"🗑 {t['title']}", callback_data=f"delone:{t['id']}")]
+        for t in tests
+    ]
+    await call.message.answer(f"{SUBJECTS[key]} — o'chirish uchun tanlang:",
+                              reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await call.answer()
+
+
+@dp.callback_query(F.data.startswith("delone:"))
+async def adm_del_one(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    test_id = int(call.data.split(":", 1)[1])
+    test = db.get_test_db(test_id)
+    db.delete_test_db(test_id)
+    title = test["title"] if test else "Test"
+    await call.message.edit_text(f"🗑 O'chirildi: {title}")
+    await call.answer("O'chirildi")
+
+
+# ---------- Testlar ro'yxati ----------
+@dp.callback_query(F.data == "adm:list")
+async def adm_list(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    grouped = db.all_tests_grouped()
+    if not grouped:
+        await call.answer("Hozircha test yo'q.", show_alert=True)
+        return
+    lines = ["📋 <b>Barcha testlar:</b>\n"]
+    for key, tests in grouped.items():
+        lines.append(f"\n{SUBJECTS.get(key, key)} ({len(tests)} ta):")
+        for t in tests:
+            lines.append(f"  • {t['title']} — {len(t['answers'])} savol")
+    await call.message.answer("\n".join(lines), parse_mode="HTML")
+    await call.answer()
 
 
 # ============================================================
