@@ -107,6 +107,28 @@ async def show_main_menu(message: Message, direction: str):
     )
 
 
+def back_btn(target: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"back:{target}")
+
+
+@dp.callback_query(F.data == "back:main")
+async def back_main(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = db.get_user(call.from_user.id)
+    if user:
+        await show_main_menu(call.message, user["direction"])
+    await call.answer()
+
+
+@dp.callback_query(F.data == "back:admin")
+async def back_admin(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return
+    await state.clear()
+    await call.message.answer("🛠 Admin panel", reply_markup=admin_menu_kb())
+    await call.answer()
+
+
 def phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Telefon raqamni yuborish", request_contact=True)]],
@@ -247,6 +269,7 @@ async def on_subject(call: CallbackQuery):
         [InlineKeyboardButton(text=f"📄 {t['title']}", callback_data=f"test:{t['id']}")]
         for t in tests
     ]
+    rows.append([back_btn("main")])
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
     await call.message.answer(f"{SUBJECTS.get(key, key)} — testni tanlang:", reply_markup=kb)
     await call.answer()
@@ -277,7 +300,8 @@ async def on_test(call: CallbackQuery):
     )
     ready_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Kalit yuborishga tayyorman",
-                              callback_data=f"ready:{test_id}")]
+                              callback_data=f"ready:{test_id}")],
+        [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"subj:{test['subject']}")],
     ])
     await call.message.answer(info, parse_mode="HTML", reply_markup=ready_kb)
     await call.answer()
@@ -378,6 +402,7 @@ async def show_referral(message: Message, user_id: int):
         f"💰 Balansingiz: <b>{stats['balance']}</b>",
         parse_mode="HTML",
         disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("main")]]),
     )
 
 
@@ -409,6 +434,7 @@ def admin_subjects_kb(prefix: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=name, callback_data=f"{prefix}:{key}")]
         for key, name in SUBJECTS.items()
     ]
+    rows.append([back_btn("admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -507,6 +533,7 @@ async def adm_del_subject(call: CallbackQuery):
         [InlineKeyboardButton(text=f"🗑 {t['title']}", callback_data=f"delone:{t['id']}")]
         for t in tests
     ]
+    rows.append([back_btn("admin")])
     await call.message.answer(f"{SUBJECTS[key]} — o'chirish uchun tanlang:",
                               reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     await call.answer()
@@ -538,7 +565,10 @@ async def adm_list(call: CallbackQuery):
         lines.append(f"\n{SUBJECTS.get(key, key)} ({len(tests)} ta):")
         for t in tests:
             lines.append(f"  • {t['title']} — {len(t['answers'])} savol")
-    await call.message.answer("\n".join(lines), parse_mode="HTML")
+    await call.message.answer(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("admin")]]),
+    )
     await call.answer()
 
 
@@ -569,7 +599,10 @@ async def adm_users(call: CallbackQuery):
             chunk = ""
         chunk += block
     if chunk:
-        await call.message.answer(chunk, parse_mode="HTML")
+        await call.message.answer(
+            chunk, parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("admin")]]),
+        )
     await call.answer()
     global BOT_USERNAME
     db.init_db()
