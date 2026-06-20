@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import io
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
@@ -13,6 +14,7 @@ from aiogram.types import (
     ReplyKeyboardRemove,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    BufferedInputFile,
 )
 
 import database as db
@@ -426,6 +428,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🗑 Test o'chirish", callback_data="adm:del")],
         [InlineKeyboardButton(text="📋 Testlar ro'yxati", callback_data="adm:list")],
         [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="adm:users")],
+        [InlineKeyboardButton(text="📥 Excel yuklab olish", callback_data="adm:excel")],
         [InlineKeyboardButton(text="🏠 Asosiy sahifa", callback_data="back:main")],
     ])
 
@@ -605,6 +608,73 @@ async def adm_users(call: CallbackQuery):
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[back_btn("admin")]]),
         )
     await call.answer()
+
+
+# ---------- Excel yuklab olish ----------
+def make_users_excel() -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment
+
+    headers = ["№", "Ism familiya", "Sinf", "Telefon", "Yo'nalish",
+               "Username", "Takliflar", "Ro'yxat sanasi"]
+    widths = [5, 25, 12, 16, 30, 18, 10, 20]
+
+    # Foydalanuvchilarni sinf bo'yicha guruhlash
+    grouped = {}
+    for u in db.all_users():
+        grouped.setdefault(u["grade"] or "Boshqa", []).append(u)
+
+    # Varaqlar tartibi: avval GRADES, keyin qolganlari
+    order = [g for g in GRADES if g in grouped] + \
+            [g for g in grouped if g not in GRADES]
+
+    def fill_sheet(ws, users):
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+        for i, u in enumerate(users, 1):
+            ws.append([
+                i, u["full_name"], u["grade"], u["phone"], u["direction"],
+                f"@{u['username']}" if u.get("username") else "",
+                u["ref_count"] or 0, (u["joined_at"] or "").replace("T", " "),
+            ])
+        for col, w in enumerate(widths, 1):
+            ws.column_dimensions[chr(64 + col)].width = w
+
+    wb = Workbook()
+    first = True
+    for grade in order:
+        # Varaq nomi 31 belgidan oshmasin
+        sheet_name = grade[:31]
+        if first:
+            ws = wb.active
+            ws.title = sheet_name
+            first = False
+        else:
+            ws = wb.create_sheet(title=sheet_name)
+        fill_sheet(ws, grouped[grade])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+@dp.callback_query(F.data == "adm:excel")
+async def adm_excel(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return
+    if not db.all_users():
+        await call.answer("Hozircha foydalanuvchi yo'q.", show_alert=True)
+        return
+    await call.answer("Tayyorlanmoqda...")
+    data = make_users_excel()
+    from datetime import datetime
+    fname = f"foydalanuvchilar_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+    await call.message.answer_document(
+        BufferedInputFile(data, filename=fname),
+        caption="📥 Foydalanuvchilar ro'yxati",
+    )
 
 
 # ============================================================
